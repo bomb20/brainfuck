@@ -3,6 +3,9 @@
 This is another implementation of the famous `brainfuck` programming-language. 
 It reads brainfuck-sourcecode from a file and reads input from stdin.
 
+This Interpreter was written in the process of a Haskell talk and is mainly
+ment for educational purpose.
+
 ## Installation
 
 Simply install via stack

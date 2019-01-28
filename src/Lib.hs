@@ -2,7 +2,7 @@
  - File              : Lib.hs
  - Author            : Vincent Truchseß <redtux@posteo.net>
  - Date              : 25.01.2019
- - Last Modified Date: 25.01.2019
+ - Last Modified Date: 28.01.2019
  - Last Modified By  : Vincent Truchseß <redtux@posteo.net>
  -}
 {-
@@ -30,7 +30,7 @@ import Data.List
 -- This Section concerns with the data-types we'll need to represent the
 -- overall state of the brainfuck-interpreter.
 -- The Tape consists of two infinite lists initialized with zeroes representing
--- the right and left side of the tape. In addition to that we have the 
+-- the right and left side of the tape. In addition to that we have the
 -- `current` element between those two, representing the head-position.
 -- The following Definitions are ment to be used inside this library.
 -- | The `Tape` type represents the infinite Tape of hte Brainfuck-Machine
@@ -47,119 +47,96 @@ instance Show Tape where
     unwords (map show (reverse (take 10 left))) ++
     "|" ++ show cur ++ "|" ++ unwords (map show (take 10 right))
 
--- Move returns a tape with the head moced to the next cell in the given
--- direction
-move dir (Tape (l:ls) c (r:rs)) =
-  case dir of
-    Ri -> Tape (c : l : ls) r rs
-    Le -> Tape ls l (c : r : rs)
-
-data Direction
-  = Ri
-  | Le
-
 -- Those functions return a tape with the current element being
 -- incremented or decremented
-increment' t@Tape {cur = c} = t {cur = (c + 1) `mod` 256}
+incTape :: Tape -> Tape
+incTape t@Tape {cur = c} = t {cur = (c + 1) `mod` 256}
 
-decrement' t@Tape {cur = c} = t {cur = (c - 1) `mod` 256}
+decTape :: Tape -> Tape
+decTape t@Tape {cur = c} = t {cur = (c - 1) `mod` 256}
 
--- Helper function to put a number into the current cell. Used in the putChar
--- function in the state implementation
-put nc t = t {cur = nc}
+moveRight :: Tape -> Tape
+moveRight (Tape l c (r:rs)) = Tape (c : l) r rs
 
--- The programm type holds a tuple of two Strings. The left one contains the 
+moveLeft :: Tape -> Tape
+moveLeft (Tape (l:ls) c rs) = Tape ls l (c : rs)
+
+-- The programm type holds a tuple of two Strings. The left one contains the
 -- commands already executed, while the right one holds the ones still to come.
-newtype Programm =
-  Prog (String, String)
+data Programm = Prog
+  { prev :: String
+  , cmd :: Char
+  , next :: String
+  }
 
--- The show implementation prints a section of the programm markingthe current 
+-- The show implementation prints a section of the programm markingthe current
 -- comand with | symbols.
 instance Show Programm where
-  show (Prog (prev, c:cs)) =
-    reverse (take 10 prev) ++ "|" ++ [c] ++ "|" ++ reverse (take 10 cs)
+  show p@Prog {next = []} = show p {next = " "}
+  show (Prog prev cmd next) =
+    reverse (take 10 prev) ++ "|" ++ [cmd] ++ "|" ++ take 10 next
 
--- Helper function extracting the current command
-getCmd (Prog (prev, c:cs)) = c
+step :: State -> State
+step s@State {prog = p} = s {prog = st p}
+  where
+    st (Prog prev c []) = Prog (c : prev) '\0' []
+    st (Prog prev c (n:ns)) = Prog (c : prev) n ns
 
--- Helper function returning a programm one step furtherthen before.
-next (Prog (prev, c:cs)) = Prog (c : prev, cs)
-
--- | Modes are used to define the runtime behaviour of the Brainfuck-Machine
--- | and can contain data needed in future applications. Mode holds the
--- | appropriate run-function for the current machine State. This is not used yet.
--- Right now, tehre is no use for the Debug - type. At the moment the debug 
--- mode is invoked by passing a state with mode = Run debug in the IO area.
-data Mode
-  = Run { func :: Maybe State -> IO () }
-  | Debug { func :: Maybe State -> IO ()
-          , seen :: String
-          , seenStack :: [String] }
-
--- | The General machine State. 
+-- | The General machine State.
 data State = State
   { tape :: Tape
   , prog :: Programm
   , stack :: [Programm]
-  , mode :: Mode
+  , runFkt :: State -> IO ()
   }
 
 instance Show State where
-  show State {tape = t, prog = p} = "\n" ++ show t ++ "\n" ++ show p ++ "\n"
+  show State {tape = t, prog = p} = "\n" ++ show t ++ "  " ++ show p ++ "\n"
 
--- This function is used to remove the current head from the prog-field in the
--- state object. It returns Nothing when the program has terminated.
-nx s@State {prog = Prog (prev, c:cs)} =
-  case cs of
-    [] -> Nothing
-    _ -> Just s {prog = Prog (c : prev, cs)}
+getCmd :: State -> Char
+getCmd s@State {prog = p} = cmd p
 
 -- | Performs an increment-operation on the current element of the tape
-increment :: State -> Maybe State
-increment s@State {tape = t} = nx $ s {tape = increment' t}
+increment :: State -> State
+increment s@State {tape = t} = step $ s {tape = incTape t}
 
 -- | Performs a decrement operation on the current element of the tape
-decrement :: State -> Maybe State
-decrement s@State {tape = t} = nx $ s {tape = decrement' t}
+decrement :: State -> State
+decrement s@State {tape = t} = step $ s {tape = decTape t}
 
 -- | Moves the head tn the tape one cell to the right
-goRight :: State -> Maybe State
-goRight s@State {tape = t} = nx $ s {tape = move Ri t}
+goRight :: State -> State
+goRight s@State {tape = t} = step $ s {tape = moveRight t}
 
 -- | Moves the head on the tape one cell to the left
-goLeft :: State -> Maybe State
-goLeft s@State {tape = t} = nx $ s {tape = move Le t}
+goLeft :: State -> State
+goLeft s@State {tape = t} = step $ s {tape = moveLeft t}
 
 -- | This function handles the beginning of loops
-loopBegin :: State -> Maybe State
-loopBegin s@State {tape = t, prog = p, stack = st} =
+loopBegin :: State -> State
+loopBegin s@State {tape = t, prog = pr@(Prog p c (n:ns)), stack = st} =
   case cur t of
-    0 -> nx $ s {prog = go 1 (next p)}
+    0 -> s {prog = go 1 (Prog (c : p) n ns)}
       where go 0 p = p
-            go n p =
-              case getCmd p of
-                '[' -> go (n + 1) (next p)
-                ']' ->
-                  if n == 1
-                    then p
-                    else go (n - 1) (next p)
-                _ -> go n (next p)
-    _ -> nx $ s {stack = p : st}
+            go n (Prog p ']' []) = Prog (']' : p) '\0' []
+            go n (Prog p '[' (x:xs)) = go (n + 1) (Prog ('[' : p) x xs)
+            go n (Prog p ']' (x:xs)) = go (n - 1) (Prog (']' : p) x xs)
+    _ -> s {stack = pr : st, prog = Prog (c : p) n ns}
 
 -- | This function handles the end of loops
-loopEnd :: State -> Maybe State
-loopEnd s@State {stack = st, tape = t} =
+loopEnd :: State -> State
+loopEnd s@State {stack = (x:xs), tape = t} =
   case cur t of
-    0 -> nx $ s {stack = tail st}
-    _ -> nx $ s {prog = head st}
+    0 -> step $ s {stack = xs}
+    _ -> step $ s {prog = x}
 
 -- | get the current element from the tape as char
 getCur :: State -> Char
 getCur State {tape = t} = chr $ cur t
 
 -- | set the current element of the tape and go to next command
-setCur :: State -> Char -> Maybe State
-setCur s@State {tape = t} c = nx $ s {tape = put (ord c) t}
+setCur :: State -> Char -> State
+setCur s@State {tape = t} c = step $ s {tape = t {cur = ord c}}
 
 -- | validates brainfuck-code by counting brackets and filters out ignored characters
 validate :: String -> Maybe String
@@ -173,10 +150,6 @@ validate = go 0 ""
       | i `elem` "+-<>,." = go n (i : os) is
       | otherwise = go n os is
 
--- | Retrieves the currend command from a state-object
-cmd :: State -> Char
-cmd State {prog = p} = getCmd p
-
 -- | Returns a clean initial state containing the given program
-initialState :: String -> Mode -> State
-initialState prog = State (Tape (repeat 0) 0 (repeat 0)) (Prog ([], prog)) []
+initialState :: String -> (State -> IO ()) -> State
+initialState (p:rog) = State (Tape (repeat 0) 0 (repeat 0)) (Prog [] p rog) []

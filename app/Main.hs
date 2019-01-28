@@ -2,7 +2,7 @@
  - File              : Main.hs
  - Author            : Vincent Truchseß <redtux@posteo.net>
  - Date              : 25.01.2019
- - Last Modified Date: 25.01.2019
+ - Last Modified Date: 28.01.2019
  - Last Modified By  : Vincent Truchseß <redtux@posteo.net>
  - app/Main.hs
  -
@@ -38,31 +38,27 @@ main = do
       case vcode of
         Just (p:rog) ->
           if length args > 1 && args !! 1 == "debug"
-            then debug $ Just $ initialState (p : rog) (Run debug)
-            else run $ Just $ initialState (p : rog) (Run run)
+            then debug $ initialState (p : rog) debug
+            else run $ initialState (p : rog) run
         _ -> return ()
 
-run :: Maybe State -> IO ()
-run Nothing = return ()
-run (Just s@State {mode = m}) =
-  case cmd s of
-    '+' -> fm $ increment s
-    '-' -> fm $ decrement s
-    '>' -> fm $ goRight s
-    '<' -> fm $ goLeft s
-    '[' -> fm $ loopBegin s
-    ']' -> fm $ loopEnd s
+run s@State {runFkt = f} =
+  case getCmd s of
+    '\0' -> return ()
+    '+' -> f $ increment s
+    '-' -> f $ decrement s
+    '>' -> f $ goRight s
+    '<' -> f $ goLeft s
+    '[' -> f $ loopBegin s
+    ']' -> f $ loopEnd s
     '.' -> do
       putChar $ getCur s
-      fm $ nx s
+      f $ step s
     ',' -> do
       c <- getChar
-      fm $ setCur s c
-  where
-    fm = func m
+      f $ setCur s c
 
-debug :: Maybe State -> IO ()
-debug Nothing = return ()
-debug (Just s) = do
+debug :: State -> IO ()
+debug s = do
   putStr $ show s
-  run $ Just s
+  run s
